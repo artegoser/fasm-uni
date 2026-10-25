@@ -29,7 +29,7 @@ org 100h
     xor cx, cx
     mov cl, [len]
     cmp bx, cx
-    jge .enc_done
+    jae .enc_done
 
     mov al, [si]
     mov cl, dl           ; CL = количество бит
@@ -64,7 +64,10 @@ org 100h
     mov ah, 09h
     int 21h
     lea dx, [mystr]
-    mov ah, 09h
+    xor cx, cx
+    mov cl, [len]
+    mov bx, 1           ; Стандартный вывод
+    mov ah, 40h         ; Вывод по длине: шифротекст может содержать '$'
     int 21h
     call print_newline
 
@@ -77,7 +80,7 @@ org 100h
     xor cx, cx
     mov cl, [len]
     cmp bx, cx
-    jge .dec_done
+    jae .dec_done
 
     mov al, [si]
     mov cl, dl

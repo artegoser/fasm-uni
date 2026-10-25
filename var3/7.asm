@@ -10,8 +10,8 @@ use16
 org 100h
 
     ; Загрузить x в DX:AX (DX = старшее слово, AX = младшее)
-    mov ax, [x]
-    mov dx, [x+2]
+    mov ax, word [x]
+    mov dx, word [x+2]
 
     ; 1) Инвертировать биты 3, 6, 7
     ;    Маска: бит 3 = 08h, бит 6 = 40h, бит 7 = 80h -> C8h
@@ -34,8 +34,8 @@ org 100h
     or ax, 07F8h
 
     ; 4) Сохранить в y
-    mov [y],   ax
-    mov [y+2], dx
+    mov word [y],   ax
+    mov word [y+2], dx
 
     ; 5) Инвертировать x
     not word [x]

@@ -12,24 +12,24 @@ org 100h
 
     ; Сразу сохраняем флаги, т.к. любые последующие команды их изменят
     pushf               ; Сохранить FLAGS в стек
-    pop dx              ; DX = FLAGS
+    pop di              ; DI = исходные FLAGS, сохраняются при выводе DOS
 
     xor bx, bx          ; BX = сумма
 
     ; CF — бит 0
-    test dx, 0001h
+    test di, 0001h
     jz .no_cf
     inc bx
 .no_cf:
 
     ; ZF — бит 6
-    test dx, 0040h
+    test di, 0040h
     jz .no_zf
     inc bx
 .no_zf:
 
     ; SF — бит 7
-    test dx, 0080h
+    test di, 0080h
     jz .no_sf
     inc bx
 .no_sf:
@@ -57,12 +57,18 @@ org 100h
     ; Если сумма > 1, инвертировать CF
     cmp bx, 1
     jbe .skip_cmc
+    push di
+    popf                 ; Восстанавливаем исходный CF после CMP и вывода
     cmc                  ; Инвертировать CF
+    pushf
+    pop di               ; Сохраняем изменённые FLAGS на время вывода
 
     lea dx, [msg_cmc]
     mov ah, 09h
     int 21h
 .skip_cmc:
+    push di
+    popf                 ; Восстановить итоговые флаги после вывода
 
     mov ax, 4C00h
     int 21h

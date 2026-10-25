@@ -8,6 +8,7 @@ org 100h
 
     xor cx, cx
     mov cl, [count]     ; CX = количество элементов
+    jcxz .equal         ; Пустые массивы равны
     lea si, [arr1]
     lea di, [arr2]
 

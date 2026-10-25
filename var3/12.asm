@@ -46,6 +46,7 @@ calc_avg:
 
     xor ax, ax
     xor dx, dx
+    jcxz .done          ; Для пустого массива возвращаем 0
 .sum_loop:
     add ax, [si]        ; Прибавить элемент
     adc dx, 0           ; Учесть перенос
@@ -55,6 +56,7 @@ calc_avg:
     ; DX:AX = сумма, BX = количество элементов
     div bx              ; AX = DX:AX / BX = среднее
 
+.done:
     pop si
     pop dx
     pop bx

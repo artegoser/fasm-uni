@@ -6,6 +6,7 @@ org 100h
 
     lea si, [arr]
     mov cx, [count]
+    jcxz .done
 
 .print_loop:
     push cx
