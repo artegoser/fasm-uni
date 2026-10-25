@@ -1,49 +1,56 @@
-; Задание 17.
-; Процедура с параметрами через стек и локальными переменными.
-; Пример: вычисление (a + b) * 2, с использованием локальной переменной
-; для хранения промежуточного результата.
+; Задание 17. Продолжение задания 16, вариант 3.
+; CircleS(R) = 3.14 * R^2 для трёх кругов.
+; Вещественный параметр R передаётся через стек по значению.
+; Квадрат радиуса хранится в локальной переменной процедуры.
 
 use16
 org 100h
 
-    ; Передаём параметры через стек
-    push word [val_b]
-    push word [val_a]
-    call calc
-    add sp, 4            ; Очистка стека (cdecl)
+    finit
 
-    ; AX = результат
-    mov [result], ax
+    push word [radius1+2]
+    push word [radius1]
+    call CircleS
+    add sp, 4
+    fstp dword [area1]
 
-    ; --- Завершение ---
+    push word [radius2+2]
+    push word [radius2]
+    call CircleS
+    add sp, 4
+    fstp dword [area2]
+
+    push word [radius3+2]
+    push word [radius3]
+    call CircleS
+    add sp, 4
+    fstp dword [area3]
+
     mov ax, 4C00h
     int 21h
 
-; =============================================
-; Процедура calc: вычисляет (a + b) * 2
-; Параметры в стеке: [BP+4] = a, [BP+6] = b
-; Локальные переменные: [BP-2] = temp (промежуточная сумма)
-; Возврат: AX = результат
-; =============================================
-calc:
+; [BP+4] = R (dword), результат — ST0.
+; Стек параметров очищает вызывающий.
+; [BP-4] = R^2 (локальный dword).
+CircleS:
     push bp
     mov bp, sp
-    sub sp, 2            ; Выделяем 2 байта для локальной переменной temp
+    sub sp, 4
 
-    ; temp = a + b
-    mov ax, [bp+4]       ; a
-    add ax, [bp+6]       ; a + b
-    mov [bp-2], ax       ; temp = a + b
+    fld dword [bp+4]
+    fmul st0, st0
+    fstp dword [bp-4]       ; Сохранить R^2 в локальной переменной
+    fld dword [bp-4]
+    fmul dword [pi]
 
-    ; result = temp * 2
-    mov ax, [bp-2]
-    shl ax, 1            ; AX = temp * 2
-
-    mov sp, bp           ; Освобождаем локальные переменные
+    mov sp, bp
     pop bp
     ret
 
-; --- Данные ---
-val_a   dw 25
-val_b   dw 37
-result  dw 0
+pi      dd 3.14
+radius1 dd 1.0
+radius2 dd 2.5
+radius3 dd 4.0
+area1   dd 0.0             ; 3.14
+area2   dd 0.0             ; 19.625
+area3   dd 0.0             ; 50.24

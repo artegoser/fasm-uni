@@ -1,40 +1,51 @@
-; Задание 16.
-; Процедура с параметрами, передаваемыми через стек.
-; Пример: процедура сложения двух чисел.
-; sum_two(a, b) -> AX = a + b
+; Задание 16. Вариант 3.
+; CircleS(R) = 3.14 * R^2. Найти площади трёх кругов.
+; R — вещественное число (dword), передаётся через стек по значению.
+; Результат возвращается в ST0, площади сохраняются как dword.
 
 use16
 org 100h
 
-    ; Передаём параметры через стек
-    push word [val_b]    ; Второй параметр
-    push word [val_a]    ; Первый параметр
-    call sum_two
-    add sp, 4            ; Очистка стека (cdecl)
+    finit
 
-    ; AX = результат
-    mov [result], ax
+    push word [radius1+2]
+    push word [radius1]
+    call CircleS
+    add sp, 4
+    fstp dword [area1]
 
-    ; --- Завершение ---
+    push word [radius2+2]
+    push word [radius2]
+    call CircleS
+    add sp, 4
+    fstp dword [area2]
+
+    push word [radius3+2]
+    push word [radius3]
+    call CircleS
+    add sp, 4
+    fstp dword [area3]
+
     mov ax, 4C00h
     int 21h
 
-; =============================================
-; Процедура sum_two: складывает два числа
-; Параметры в стеке: [BP+4] = a, [BP+6] = b
-; Возврат: AX = a + b
-; =============================================
-sum_two:
+; [BP+4] = R (dword), результат — ST0.
+; Стек параметров очищает вызывающий.
+CircleS:
     push bp
     mov bp, sp
 
-    mov ax, [bp+4]       ; a
-    add ax, [bp+6]       ; a + b
+    fld dword [bp+4]
+    fmul st0, st0
+    fmul dword [pi]
 
     pop bp
     ret
 
-; --- Данные ---
-val_a   dw 25
-val_b   dw 37
-result  dw 0
+pi      dd 3.14
+radius1 dd 1.0
+radius2 dd 2.5
+radius3 dd 4.0
+area1   dd 0.0             ; 3.14
+area2   dd 0.0             ; 19.625
+area3   dd 0.0             ; 50.24
