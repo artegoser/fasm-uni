@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build and execute all existing exercises: python3 var3/verify.py.
 
-Requires fasm on PATH and the Python package unicorn (tested with 2.1.4).
-The emulator supplies the DOS console calls used by these COM programs.
-Generated binaries and symbol probes are kept in a temporary directory.
+Requires fasm, unicorn 2.1.4, and qemu-system-i386 (10.2 tested).
+Unicorn supplies DOS console calls. QEMU executes the AVX COM program,
+including its 16-bit protected-mode transition. Binaries use a temporary directory.
 """
 
 import math
@@ -20,6 +20,8 @@ from unicorn.x86_const import (
     UC_X86_REG_AX,
     UC_X86_REG_BP,
     UC_X86_REG_CS,
+    UC_X86_REG_CR0,
+    UC_X86_REG_CR4,
     UC_X86_REG_CX,
     UC_X86_REG_DS,
     UC_X86_REG_DX,
@@ -50,6 +52,10 @@ SYMBOLS = {
     "17": "radius1 radius2 radius3 area1 area2 area3",
     "18": "buffer",
     "19": "a b c d e f result1 result2 result3",
+    "20": "x1 x2 xs results valid",
+    "21": "count repetitions array1 array2 result_scalar result_mmx ticks_scalar ticks_mmx",
+    "22": "count repetitions array1 array2 result_scalar result_sse ticks_scalar ticks_sse",
+    "23": "count array1 array2 result_avx",
 }
 
 
@@ -72,6 +78,11 @@ class Program:
             self.uc.reg_write(register, 0)
         self.uc.reg_write(UC_X86_REG_SP, 0xFFFE)
         self.uc.reg_write(UC_X86_REG_BP, 0x5678)
+        # ET is fixed to 1 on the CPUs supporting these instructions.
+        self.uc.reg_write(UC_X86_REG_CR0, 0x10)
+        self.initial_controls = {
+            reg: self.uc.reg_read(reg) for reg in (UC_X86_REG_CR0, UC_X86_REG_CR4)
+        }
         for name, data in patches:
             self.uc.mem_write(symbols[name], data)
         if flags is not None:
@@ -83,10 +94,10 @@ class Program:
         self.output = bytearray()
         self.exit_code = None
         self.uc.hook_add(UC_HOOK_INTR, self.interrupt)
-        self.uc.emu_start(0x100, 0x10000, count=100_000)
+        self.uc.emu_start(0x100, 0x10000, count=2_000_000)
         if self.exit_code is None:
             raise AssertionError(
-                "Program did not terminate within 100,000 instructions"
+                "Program did not terminate within 2,000,000 instructions"
             )
         if self.uc.reg_read(UC_X86_REG_SP) != 0xFFFE:
             raise AssertionError("Program did not restore SP")
@@ -148,9 +159,10 @@ class Exercises(unittest.TestCase):
         directory = Path(cls.temp.name)
         cls.programs = {}
         sources = {p.stem for p in ROOT.glob("*.asm")}
-        if sources != set(SYMBOLS):
+        covered = set(SYMBOLS)
+        if sources != covered:
             raise AssertionError(
-                f"Update verification coverage for: {sources ^ set(SYMBOLS)}"
+                f"Update verification coverage for: {sources ^ covered}"
             )
         for task, names in SYMBOLS.items():
             source = ROOT / f"{task}.asm"
@@ -388,6 +400,283 @@ class Exercises(unittest.TestCase):
         )
         self.assertEqual(p.unpack("result1", "h"), (32767,))
         self.assertEqual(p.unpack("result2", "h"), (-1,))
+
+    def test_20_fpu_table_and_domain(self):
+        from unicorn.x86_const import UC_X86_REG_FPSW, UC_X86_REG_FPTAG
+
+        domain_message = "Значение аргумента не входит в ОДЗ"
+        for x1, x2 in (
+            (1.0, 3.0),
+            (0.0, 9.0),
+            (-3.0, 0.0),
+            (0.0, 0.0),
+            (1.0, 1.0),
+            (3.0, 1.0),
+            (0.125, 2.5),
+            (-4.0, -1.0),
+        ):
+            with self.subTest(x1=x1, x2=x2):
+                p = self.run_task("20", [("x1", pack("f", x1)), ("x2", pack("f", x2))])
+                xs = p.unpack("xs", "10f")
+                results = p.unpack("results", "10f")
+                valid = p.read("valid", 10)
+                lines = p.output.decode("cp866").splitlines()
+                self.assertEqual(len(lines), 10)
+                self.assertEqual(xs[0], x1)
+                self.assertEqual(xs[-1], x2)
+                for i, (x, result, line) in enumerate(zip(xs, results, lines)):
+                    expected_x = struct.unpack("<f", pack("f", x1 + (x2 - x1) * i / 9))[
+                        0
+                    ]
+                    self.assertEqual(x, expected_x)
+                    printed_x, printed_result = line.split("  ")
+                    self.assertAlmostEqual(
+                        float(printed_x), x, delta=max(1e-44, abs(x) * 6e-7)
+                    )
+                    self.assertEqual(valid[i], int(x != 0))
+                    if x == 0:
+                        self.assertEqual(printed_result, domain_message)
+                        self.assertEqual(result, 0)
+                        continue
+                    expected = (
+                        (2 ** (1 / x - 1) - math.sin(x - 1))
+                        * (3 - x)
+                        / (math.cos(1 - x) ** 2 + math.log2(2 + abs(1 - x)))
+                    )
+                    self.assertAlmostEqual(
+                        result, expected, delta=max(1e-7, abs(expected) * 2e-6)
+                    )
+                    self.assertAlmostEqual(
+                        float(printed_result),
+                        result,
+                        delta=max(1e-44, abs(result) * 6e-7),
+                    )
+                self.assertEqual(p.uc.reg_read(UC_X86_REG_FPSW) & 0x3841, 0)
+                self.assertEqual(p.uc.reg_read(UC_X86_REG_FPTAG), 0xFFFF)
+
+    def test_21_mmx_signed_products_and_tails(self):
+        rng = random.Random(8087)
+        cases = [
+            ([-32768, 32767, -1, 0, 1] * 4, [32767, -32768, 1, -1, 0] * 4),
+            ([-32768] * 19, [-32768] * 19),
+            ([32767] * 19, [32767] * 19),
+        ]
+        cases += [
+            (
+                [rng.randint(-32768, 32767) for _ in range(19)],
+                [rng.randint(-32768, 32767) for _ in range(19)],
+            )
+            for _ in range(10)
+        ]
+        for count in range(20):
+            for a, b in cases:
+                with self.subTest(count=count, a=a[:count]):
+                    p = self.run_task(
+                        "21",
+                        [
+                            ("count", pack("H", count)),
+                            ("repetitions", pack("H", 1)),
+                            ("array1", pack("19h", *a[:19])),
+                            ("array2", pack("19h", *b[:19])),
+                            ("result_scalar", b"\x55" * 38),
+                            ("result_mmx", b"\x55" * 38),
+                        ],
+                    )
+                    expected = pack(
+                        "h" * count,
+                        *[x * y >> 16 for x, y in zip(a[:count], b[:count])],
+                    ) + b"\x55" * (38 - 2 * count)
+                    self.assertEqual(p.read("result_scalar", 38), expected)
+                    self.assertEqual(p.read("result_mmx", 38), expected)
+
+    def test_22_sse_float_products_and_tails(self):
+        rng = random.Random(128)
+        cases = [
+            ([0.0, -0.0, 1.0, -1.0, 0.125] * 4, [-1.0, 1.0, -0.0, -1.0, -0.125] * 4),
+            (
+                [math.inf, -math.inf, math.nan, 1e-40, 1e38] * 4,
+                [0.0, -1.0, 2.0, 0.5, 1e38] * 4,
+            ),
+        ]
+        cases += [
+            (
+                [rng.uniform(-1e10, 1e10) for _ in range(19)],
+                [rng.uniform(-1e10, 1e10) for _ in range(19)],
+            )
+            for _ in range(5)
+        ]
+        for count in range(20):
+            for a, b in cases:
+                a = struct.unpack("<19f", pack("19f", *a[:19]))
+                b = struct.unpack("<19f", pack("19f", *b[:19]))
+                with self.subTest(count=count, a=a[:count]):
+                    p = self.run_task(
+                        "22",
+                        [
+                            ("count", pack("H", count)),
+                            ("repetitions", pack("H", 1)),
+                            ("array1", pack("19f", *a)),
+                            ("array2", pack("19f", *b)),
+                            ("result_scalar", b"\x55" * 76),
+                            ("result_sse", b"\x55" * 76),
+                        ],
+                    )
+                    for name in ("result_scalar", "result_sse"):
+                        actual = p.unpack(name, "19f")
+                        for x, y, value in zip(a[:count], b[:count], actual):
+                            expected = x * y
+                            if math.isnan(expected):
+                                self.assertTrue(math.isnan(value))
+                                continue
+                            try:
+                                expected_bytes = pack("f", expected)
+                            except OverflowError:
+                                expected_bytes = pack(
+                                    "f", math.copysign(math.inf, expected)
+                                )
+                            self.assertEqual(pack("f", value), expected_bytes)
+                        self.assertEqual(
+                            p.read(name, 76)[count * 4 :], b"\x55" * (76 - count * 4)
+                        )
+                    for reg, initial in p.initial_controls.items():
+                        self.assertEqual(p.uc.reg_read(reg), initial)
+
+    def test_21_22_default_benchmarks(self):
+        from unicorn.x86_const import UC_X86_REG_FPTAG
+
+        for task, kind in (("21", "mmx"), ("22", "sse")):
+            with self.subTest(task=task):
+                p = self.run_task(task)
+                size = 38 if task == "21" else 76
+                self.assertEqual(
+                    p.read("result_scalar", size), p.read(f"result_{kind}", size)
+                )
+                self.assertGreater(p.unpack("ticks_scalar", "Q")[0], 0)
+                self.assertGreater(p.unpack(f"ticks_{kind}", "Q")[0], 0)
+                self.assertEqual(p.uc.reg_read(UC_X86_REG_FPTAG), 0xFFFF)
+
+    def run_qemu(self, task, result_name, size, patches=(), cpu="max"):
+        code, symbols = self.programs[task]
+        code = bytearray(code)
+        for name, data in patches:
+            start = symbols[name] - 0x100
+            code[start : start + len(data)] = data
+        directory = Path(self.temp.name)
+        program = directory / "qemu-case.com"
+        program.write_bytes(code)
+        disk = directory / "qemu-case.img"
+        result = subprocess.run(
+            [
+                "fasm",
+                "-d",
+                f"PROGRAM='{program.as_posix()}'",
+                "-d",
+                f"RESULT={symbols[result_name]}",
+                "-d",
+                f"RESULT_SIZE={size}",
+                str(ROOT / "tests" / "avx_boot.asm"),
+                str(disk),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        disk.write_bytes(disk.read_bytes().ljust(1474560, b"\0"))
+        output = directory / "qemu-output.bin"
+        result = subprocess.run(
+            [
+                "qemu-system-i386",
+                "-accel",
+                "tcg",
+                "-cpu",
+                cpu,
+                "-m",
+                "16M",
+                "-drive",
+                f"file={disk},format=raw,if=floppy",
+                "-boot",
+                "a",
+                "-display",
+                "none",
+                "-monitor",
+                "none",
+                "-serial",
+                "none",
+                "-no-reboot",
+                "-device",
+                "isa-debug-exit,iobase=0xf4,iosize=0x04",
+                "-debugcon",
+                f"file:{output}",
+                "-global",
+                "isa-debugcon.iobase=0xe9",
+            ],
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 33, result.stderr.decode())
+        data = output.read_bytes()
+        self.assertEqual(len(data), 35 + size)
+        code, ss, ds, es, cs, sp, bp, flags, cr0, cr4, old_gdt, new_gdt = struct.unpack(
+            "<B7HII6s6s", data[:35]
+        )
+        self.assertEqual((ss, ds, es, cs), (0x1000,) * 4)
+        self.assertEqual((sp, bp), (0xFFFE, 0x5678))
+        self.assertEqual(flags & 0x200, 0x200)
+        self.assertEqual((cr0, cr4), (0x10, 0))
+        self.assertEqual(old_gdt, new_gdt)
+        return code, data[35:]
+
+    def test_21_22_qemu_real_mode_benchmarks(self):
+        for task, kind, size in (("21", "mmx", 38), ("22", "sse", 76)):
+            with self.subTest(task=task):
+                code, data = self.run_qemu(task, "result_scalar", size * 2 + 16)
+                self.assertEqual(code, 0)
+                self.assertEqual(data[:size], data[size : size * 2])
+                self.assertGreater(struct.unpack_from("<Q", data, size * 2)[0], 0)
+                self.assertGreater(struct.unpack_from("<Q", data, size * 2 + 8)[0], 0)
+
+    def test_23_avx_com_products_and_all_tails(self):
+        rng = random.Random(256)
+        cases = [
+            (
+                [rng.uniform(-1e10, 1e10) for _ in range(19)],
+                [rng.uniform(-1e10, 1e10) for _ in range(19)],
+            ),
+            (
+                [0.0, -0.0, math.inf, math.nan, 1e-40] * 4,
+                [-1.0, 1.0, 0.0, 2.0, 0.5] * 4,
+            ),
+        ]
+        for count in range(20):
+            for a, b in cases:
+                a = struct.unpack("<19f", pack("19f", *a[:19]))
+                b = struct.unpack("<19f", pack("19f", *b[:19]))
+                with self.subTest(count=count, a=a[:count]):
+                    code, data = self.run_qemu(
+                        "23",
+                        "result_avx",
+                        76,
+                        [
+                            ("count", pack("H", count)),
+                            ("array1", pack("19f", *a)),
+                            ("array2", pack("19f", *b)),
+                            ("result_avx", b"\x55" * 76),
+                        ],
+                    )
+                    self.assertEqual(code, 0)
+                    actual = struct.unpack("<19f", data)
+                    for x, y, value in zip(a[:count], b[:count], actual):
+                        expected = x * y
+                        if math.isnan(expected):
+                            self.assertTrue(math.isnan(value))
+                        else:
+                            self.assertEqual(pack("f", value), pack("f", expected))
+                    self.assertEqual(data[count * 4 :], b"\x55" * (76 - count * 4))
+
+    def test_23_rejects_cpu_without_avx(self):
+        code, data = self.run_qemu("23", "result_avx", 76, cpu="qemu32")
+        self.assertEqual(code, 1)
+        self.assertEqual(data, b"\0" * 76)
 
 
 if __name__ == "__main__":
