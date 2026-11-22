@@ -53,3 +53,16 @@ assembled programs, including empty arrays, every remainder length, signed extre
 floating-point special values, domain errors, stack balance and restored CPU state.
 The AVX tests boot the COM file at a nonzero DOS segment and exercise its full mode
 transition in QEMU. `tests/avx_boot.asm` only supplies the test environment.
+
+The four standalone C++ versions are in `cpp/` with the same lab numbers and sample
+inputs. They print their results and build with GCC or Clang on x86-64 Linux.
+Tasks 21 and 22 time the same 1,000 passes with `std::chrono::steady_clock` in
+nanoseconds. Task 23 requires AVX support from the CPU and operating system.
+
+```sh
+for n in 20 21 22 23; do
+    g++ -std=c++20 -O2 -fno-tree-vectorize -Wall -Wextra -Wpedantic \
+        "var3/cpp/$n.cpp" -o "/tmp/lab$n" || break
+    "/tmp/lab$n" || break
+done
+```
