@@ -8,6 +8,9 @@ Each lab is a standalone FASM source using `use16` and `org 100h`.
 | `22.asm` | SSE: multiplication of float arrays | `result_scalar`, `result_sse`, `ticks_scalar`, `ticks_sse` |
 | `23.asm` | AVX: multiplication of float arrays | `result_avx` |
 
+See the [line-by-line explanations](explanations/) in Russian for each FASM and
+C++ source file.
+
 The function in task 20 is:
 
 ```text
