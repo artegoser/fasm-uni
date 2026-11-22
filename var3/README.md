@@ -55,13 +55,20 @@ The AVX tests boot the COM file at a nonzero DOS segment and exercise its full m
 transition in QEMU. `tests/avx_boot.asm` only supplies the test environment.
 
 The four standalone C++ versions are in `cpp/` with the same lab numbers and sample
-inputs. They print their results and build with GCC or Clang on x86-64 Linux.
+inputs. They use Intel syntax in `__asm { ... }` blocks, as in the handout.
 Tasks 21 and 22 time the same 1,000 passes with `std::chrono::steady_clock` in
 nanoseconds. Task 23 requires AVX support from the CPU and operating system.
 
+Use Clang with `-fasm-blocks` on x86-64 Linux. The fixed array addresses in the
+assembly blocks require a non-PIE build on this target.
+Microsoft documents support through Pentium 4 and AMD Athlon for its inline
+assembler, so use Clang for the handout's AVX mnemonics.
+[MSVC inline instruction set](https://learn.microsoft.com/en-us/cpp/assembler/inline/instruction-set-for-inline-assembly)
+
 ```sh
 for n in 20 21 22 23; do
-    g++ -std=c++20 -O2 -fno-tree-vectorize -Wall -Wextra -Wpedantic \
+    clang++ -std=c++20 -O2 -fasm-blocks -fno-pie -no-pie \
+        -fno-vectorize -fno-slp-vectorize -Wall -Wextra \
         "var3/cpp/$n.cpp" -o "/tmp/lab$n" || break
     "/tmp/lab$n" || break
 done

@@ -1,43 +1,51 @@
 // Задание 20. FPU, вариант 3. Таблица функции на [1, 3].
-#include <cmath>
 #include <iomanip>
 #include <iostream>
 
 float evaluate(float x) {
-    const double angle = double{x} - 1;
-    const double exponent = 1.0 / x - 1;
-    const double log_argument = 2 + std::abs(angle);
-    double power, cosine, sine, logarithm;
+    const float one = 1.0f;
+    const float two = 2.0f;
+    const float three = 3.0f;
+    float value = 0.0f;
 
-    // GNU asm: степень через F2XM1 и FSCALE, синус и косинус через FSINCOS.
-    asm(
-        "fldl %[exponent]\n\t"
-        "fld %%st(0)\n\t"
-        "frndint\n\t"
-        "fxch %%st(1)\n\t"
-        "fsub %%st(1), %%st(0)\n\t"
-        "f2xm1\n\t"
-        "fld1\n\t"
-        "faddp\n\t"
-        "fscale\n\t"
-        "fstp %%st(1)\n\t"
-        "fstpl %[power]\n\t"
-        "fldl %[angle]\n\t"
-        "fsincos\n\t"
-        "fstpl %[cosine]\n\t"
-        "fstpl %[sine]\n\t"
-        "fld1\n\t"
-        "fldl %[log_argument]\n\t"
-        "fyl2x\n\t"
-        "fstpl %[logarithm]"
-        : [power] "=&m"(power), [cosine] "=&m"(cosine),
-          [sine] "=&m"(sine), [logarithm] "=m"(logarithm)
-        : [exponent] "m"(exponent), [angle] "m"(angle),
-          [log_argument] "m"(log_argument)
-        : "st", "st(1)", "st(2)");
+    __asm {
+        // 2^z, где z = 1/x - 1. F2XM1 получает только дробную часть.
+        fld1
+        fdiv x
+        fsub one
+        fld st(0)
+        frndint
+        fxch st(1)
+        fsub st(0), st(1)
+        f2xm1
+        fld1
+        faddp st(1), st(0)
+        fscale
+        fstp st(1)
 
-    return static_cast<float>(
-        (power - sine) * (3.0 - x) / (cosine * cosine + logarithm));
+        // Одновременно получаем sin(x-1) и cos(x-1).
+        fld x
+        fsub one
+        fld st(0)
+        fsincos
+        fmul st(0), st(0)
+        fxch st(1)
+        fsubp st(3), st(0) // ST(0) = cos², ST(1) = x-1, ST(2) = 2^z - sin
+
+        fxch st(1)
+        fabs
+        fadd two
+        fld1
+        fxch st(1)
+        fyl2x              // log2(2+|x-1|)
+        faddp st(1), st(0)
+        fdivp st(1), st(0)
+        fld three
+        fsub x
+        fmulp st(1), st(0)
+        fstp value
+    }
+    return value;
 }
 
 int main() {
