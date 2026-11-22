@@ -414,6 +414,8 @@ class Exercises(unittest.TestCase):
             (3.0, 1.0),
             (0.125, 2.5),
             (-4.0, -1.0),
+            (-(2.0**-40), -(2.0**-40)),
+            (2.0**40, 2.0**40),
         ):
             with self.subTest(x1=x1, x2=x2):
                 p = self.run_task("20", [("x1", pack("f", x1)), ("x2", pack("f", x2))])

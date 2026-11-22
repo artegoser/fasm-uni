@@ -54,50 +54,35 @@ unsupported:
 ; DI = процедура. EDX:EAX = время repetitions вызовов в тактах TSC.
 ; CPUID сериализует выполнение перед чтением TSC с обеих сторон.
 measure:
-    push ebx
-    push ecx
-    push esi
+    push bp
+    mov bp, [repetitions]
     xor eax, eax
     cpuid
     rdtsc
     mov dword [tsc_start], eax
     mov dword [tsc_start+4], edx
-    mov cx, [repetitions]
-    jcxz .stop
+    test bp, bp
+    jz .stop
 .repeat:
     call di
-    loop .repeat
+    dec bp
+    jnz .repeat
 .stop:
     xor eax, eax
     cpuid
     rdtsc
     sub eax, dword [tsc_start]
     sbb edx, dword [tsc_start+4]
-    pop esi
-    pop ecx
-    pop ebx
+    pop bp
     ret
 
 multiply_scalar:
-    push cx
-    push si
+    mov bx, result_scalar
     mov cx, [count]
     xor si, si
-    jcxz .done
-.element:
-    fld dword [array1+si]
-    fmul dword [array2+si]
-    fstp dword [result_scalar+si]
-    add si, 4
-    loop .element
-.done:
-    pop si
-    pop cx
-    ret
+    jmp multiply_elements
 
 multiply_sse:
-    push cx
-    push si
     mov cx, [count]
     shr cx, 2
     xor si, si
@@ -110,18 +95,20 @@ multiply_sse:
     add si, 16
     loop .vector
 .tail:
+    mov bx, result_sse
     mov cx, [count]
     and cx, 3
+
+; CX = число оставшихся элементов, SI = смещение, BX = массив результатов.
+multiply_elements:
     jcxz .done
 .element:
     fld dword [array1+si]
     fmul dword [array2+si]
-    fstp dword [result_sse+si]
+    fstp dword [bx+si]
     add si, 4
     loop .element
 .done:
-    pop si
-    pop cx
     ret
 
 count dw 19

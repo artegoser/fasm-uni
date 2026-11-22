@@ -17,13 +17,14 @@ org 100h
     mov cx, 10
 
 .point:
+    cmp di, 9
+    je .last
     mov [index], di
     fld qword [step]
     fimul word [index]
     fadd dword [x1]
-    cmp di, 9
-    jne .save_x
-    fstp st0
+    jmp .save_x
+.last:
     fld dword [x2]          ; Последняя точка — точно правая граница
 .save_x:
     fstp dword [xs+si]
@@ -38,8 +39,7 @@ org 100h
     fstsw ax
     sahf
     fstp st0
-    je .domain_error
-    jp .domain_error
+    je .domain_error       ; Нуль или NaN
 
     ; 2^z = (1 + (2^(z-round(z))-1)) * 2^round(z), z = 1/x-1.
     ; Аргумент F2XM1 находится в [-0.5, 0.5].
@@ -58,15 +58,12 @@ org 100h
 
     fld dword [xs+si]
     fsub dword [one]
-    fsin
-    fsubp st1, st0          ; Числитель без множителя (3-x)
-
-    fld1
-    fsub dword [xs+si]
-    fcos
+    fld st0
+    fsincos                ; cos(x-1), sin(x-1), x-1, 2^z
     fmul st0, st0
-    fld1
-    fsub dword [xs+si]
+    fxch st1
+    fsubp st3, st0         ; cos²(x-1), x-1, 2^z-sin(x-1)
+    fxch st1
     fabs
     fadd dword [two]
     fld1
@@ -137,66 +134,49 @@ print_real:
     ; Нуль не требует нормализации.
 .convert:
     fimul dword [million]
-    fistp dword [mantissa]
-    cmp dword [mantissa], 10000000
+    fbstp tbyte [mantissa]  ; Каждая полутетрада содержит десятичную цифру
+    mov eax, dword [mantissa]
+    cmp eax, 10000000h
     jne .digits
-    mov dword [mantissa], 1000000
+    mov eax, 01000000h
     inc bx                 ; Округление 9.9999995 -> 1.000000e+1
 .digits:
-    push bx
-    mov eax, [mantissa]
-    mov ebx, 1000000
-    mov di, number_buffer
-    mov cx, 7
+    mov di, number_buffer+7
+    mov cx, 6
 .digit:
-    xor edx, edx
-    div ebx
-    add al, '0'
-    mov [di], al
-    inc di
-    cmp cx, 7
-    jne .fraction
-    inc di                 ; Пропустить десятичную точку
-.fraction:
-    mov esi, edx
-    mov eax, ebx
-    xor edx, edx
-    mov ebx, 10
-    div ebx
-    mov ebx, eax
-    mov eax, esi
+    mov dl, al
+    and dl, 0Fh
+    add dl, '0'
+    mov [di], dl
+    dec di
+    shr eax, 4
     loop .digit
+    add al, '0'
+    mov [number_buffer], al
+
+    mov al, bl             ; Порядок single precision не превышает двух цифр
+    mov dl, '+'
+    test al, al
+    jns .exponent
+    mov dl, '-'
+    neg al
+.exponent:
+    mov [exponent_sign], dl
+    aam                    ; AH = десятки, AL = единицы
+    test ah, ah
+    jz .one_digit
+    add ax, 3030h
+    xchg al, ah
+    mov word [exponent_digits], ax
+    jmp .print
+.one_digit:
+    add al, '0'
+    mov ah, '$'
+    mov word [exponent_digits], ax
+.print:
     mov dx, number_buffer
     mov ah, 09h
     int 21h
-    pop ax                 ; Порядок
-    mov dl, '+'
-    test ax, ax
-    jns .exponent
-    mov dl, '-'
-    neg ax
-.exponent:
-    push ax
-    mov ah, 02h
-    int 21h
-    pop ax
-
-    ; Как в задании 13: цифры целого через деление и стек.
-    xor cx, cx
-    mov bx, 10
-.divide:
-    xor dx, dx
-    div bx
-    push dx
-    inc cx
-    test ax, ax
-    jnz .divide
-.print_digit:
-    pop dx
-    add dl, '0'
-    mov ah, 02h
-    int 21h
-    loop .print_digit
     popad
     ret
 
@@ -213,8 +193,10 @@ two      dd 2.0
 three    dd 3.0
 ten      dd 10.0
 million  dd 1000000
-mantissa dd 0
-number_buffer db '0.000000e$'
+mantissa dt 0.0
+number_buffer db '0.000000e'
+exponent_sign db '+'
+exponent_digits db '00$'
 separator db '  ', '$'
 newline db 13, 10, '$'
 ; «Значение аргумента не входит в ОДЗ» в кодировке DOS CP866.
